@@ -27,5 +27,6 @@ pip-delete-this-directory.txt
 nosetests.xml
 coverage.xml
 
-# notebooks
-.ipynb
+# otros
+*.ipynb
+*.pdf
