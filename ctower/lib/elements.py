@@ -179,6 +179,7 @@ class Trap(Element):
 
 @dataclass
 class Player(Element):
+    kind: str = "Player"
     dir_y: int = 0
     dir_x: int = 0
     health: int = 100

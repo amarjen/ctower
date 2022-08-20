@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*
 
-from .lib.elements import Base, Player, Trap, Bomb, Fruit, Lintern
+from .lib.elements import Element, Base, Player, Trap, Bomb, Fruit, Lintern
 from .lib.elements import Mountain, Mine, Cannon
 from .lib.elements import Spawner, Enemy
 
@@ -138,15 +138,14 @@ class Game:
         clock = time.time()
         while True:
 
-            self.buildings = list(chain(self.mines, self.cannons))
+            # 1. Process Buildings (Mine -> Dig, Cannon -> Shoot...)
+            #    ,unless they are destroyed by an enemy
 
-            self.render_all()
-            ## Process Buildings (Mine -> Dig, Cannon -> Shoot...)
-            ## , unless they are destroyed by an enemy
+            self.buildings = list(chain(self.mines, self.cannons))
             for building in self.buildings:
                 if building.health <= 0:
                     self.buildings.remove(building)
-                    self.erase(building)
+                    self.clear(building)
 
                     if building.kind == "Mine":
                         self.mines.remove(building)
@@ -168,20 +167,20 @@ class Game:
 
                         if target is not None and target in self.enemies:
                             self.enemies.remove(target)
-                            self.erase(target)
+                            self.clear(target)
                             self.player.points += 1
                             building.kills += 1
 
-            ## Spawn Enemies
+            # 2. Spawn Enemies
             if random.randint(0, 1000) < 10:
                 s = random.choice(self.spawners)
                 self.enemies.append(s.spawn())
 
-            ## Enemies movements
+            # 3. Enemies Actions
             if time.time() > clock + max(0.2, 1 - self.player.level / 12):
                 for enemy in self.enemies:
 
-                    ## scan targets
+                    # a. scan targets
                     targets = [
                         {"target": target, "d": enemy.distance(target)}
                         for target in chain(
@@ -193,9 +192,9 @@ class Game:
                         )
                     ]
 
+                    # b. Choose the nearest target and moves towards it
+                    # TODO: Set weight to target kinds
                     if len(targets) > 0:
-                        # choose the nearest target and moves towards it
-                        # TODO: Set weight to target kinds
                         target = sorted(targets, key=lambda x: x["d"])[0]["target"]
 
                         if target.x - enemy.x > 0:
@@ -208,19 +207,20 @@ class Game:
                         elif target.y - enemy.y < 0:
                             delta_y = -1
 
+                    # if no targets, move randomly
                     else:
                         delta_y = random.randint(-1, 1)
                         delta_x = random.randint(-1, 1)
 
                     if (enemy.y, enemy.x) in self.area_light:
-                        self.erase(enemy)
+                        self.clear(enemy)
 
                     enemy.move(
                         max(1, min(self.max_y, enemy.y + delta_y)),
                         max(1, min(self.max_x, enemy.x + delta_x)),
                     )
 
-                    # check collision with player
+                    # c. check collisions with player, buildings, base
                     if collision(self.player, enemy):
                         combat_result = random.randint(0, 99)
                         if combat_result < 80 and enemy in self.enemies:
@@ -233,12 +233,10 @@ class Game:
                             play_sound("scream_fight")
                             self.player.health -= random.randint(5, 10)
 
-                    # check collision with self.buildings
                     for building in self.buildings:
                         if collision(enemy, building):
                             building.health -= 1
 
-                    # check collision with base
                     if collision(self.base, enemy) and enemy in self.enemies:
                         self.enemies.remove(enemy)
                         self.player.points += 1
@@ -254,28 +252,37 @@ class Game:
 
             delta_x = delta_y = 0
 
-            ## Check Bombs
+            # 4. Monitor Activated Bombs
             if len(self.bombs_activated) > 0:
                 for bomb in self.bombs_activated:
 
                     for (y, x) in bomb.area:
                         if (y > 0 and y < self.max_y) and (x > 0 and x < self.max_x):
-                            self.screen.addstr(y, x, "~", curses.color_pair(2))
+                            self.screen.addstr(y, x, "~", curses.color_pair(4))
 
                     if bomb.is_kaboom:
                         play_sound("kaboom")
 
                         victims = nearby_elements(
-                            bomb, chain(self.enemies, self.spawners), d=bomb.strength
+                            bomb,
+                            chain(
+                                self.enemies,
+                                self.spawners,
+                                [
+                                    self.player,
+                                ],
+                            ),
+                            d=bomb.strength,
                         )
 
                         if victims is not None:
                             for victim in victims:
-                                victim.health -= 550
+                                if victim.kind == "Player":
+                                    play_sound("scream-bomb")
+                                    self.player.health -= 50
 
-                        if (self.player.y, self.player.x) in bomb.area:
-                            play_sound("scream-bomb")
-                            self.player.health -= 510
+                                else:
+                                    victim.health -= 5
 
                         for (y, x) in bomb.area:
                             if (y > 0 and y < self.max_y) and (
@@ -284,8 +291,7 @@ class Game:
                                 self.clear(y, x)
 
                         self.bombs_activated.remove(bomb)
-                        self.erase(bomb)
-                        self.screen.refresh()
+                        self.clear(bomb)
 
             for enemy in chain(self.enemies, self.spawners):
                 if enemy.health < 0 and enemy in chain(self.enemies, self.spawners):
@@ -294,7 +300,7 @@ class Game:
                     elif enemy.kind == "Spawner":
                         self.spawners.remove(enemy)
 
-                    self.erase(enemy)
+                    self.clear(enemy)
                     self.player.points += enemy.level
 
             ## Recover Trap
@@ -336,7 +342,7 @@ class Game:
 
             # Wait for a keystroke
 
-            #  key_bindings ={'q': exit,
+            #  key_bindings ={'q': sys.exit,
             #  'h': move_left,
             #  'j': move_down,
             #  'k': move_up,
@@ -471,7 +477,7 @@ class Game:
                         self.trap.x = self.player.x + self.player.dir_x * 2
 
             if self.player.to_move:
-                self.erase(self.player)
+                self.clear(self.player)
                 self.player.move(
                     max(1, min(self.max_y, self.player.y + delta_y)),
                     max(1, min(self.max_x, self.player.x + delta_x)),
@@ -481,11 +487,7 @@ class Game:
 
             ####
 
-            def exit():
-                return
-
-            #####
-
+            self.render_all()
             self.print_stats()
 
             # Gameover Condition
@@ -508,9 +510,6 @@ class Game:
 
             self.screen.refresh()
             curses.napms(1000 // FPS)
-
-    def panic(self):
-        pass
 
     def print_stats(self):
         # print stats
@@ -589,20 +588,22 @@ class Game:
         self.pause("q")
         sys.exit()
 
-    def erase(self, element):
+    def clear(self, *args):
         """
-        Erase element position
+        clears one pixel from screen
+        calling with an Element instance (Player, Enemy...), or directly by coordinate
         """
-        self.clear(element.y, element.x)
+        if isinstance(args[0], Element):
+            y, x = args[0].y, args[0].x
+        else:
+            y, x = args[0:2]
 
-    def clear(self, y, x):
         self.screen.addch(y, x, " ", curses.color_pair(1))
 
     def render_all(self):
         """
         render all visible elements and updates fog area
         """
-        pass
         ## Update Area Light
         self.area_light = set(surronding_area(self.player, 5, *self.screen_limits))
 
@@ -651,7 +652,7 @@ class Game:
 
     def render(self, element, *args, **kwargs):
         """
-        render elements in screen
+        render single element
         """
 
         if not element.deployed or not element.visible:
