@@ -1,14 +1,14 @@
-#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 from dataclasses import dataclass, field
+from .settings import Settings
 import time
 import math
 
 
 @dataclass
-class Element:
+class Entity:
     """
-    Game Element Base Class
+    Game Entity Base Class
     """
 
     y: int
@@ -16,11 +16,10 @@ class Element:
     kind: str = ""
     color: int = 1  # default color
     symbol: None = None
-    fmt: str = None
     deployed: bool = True
     visible: bool = True
     level: int = 10
-    health: int = 1000
+    health: int = 10
 
     def distance(self, other):
         """
@@ -30,18 +29,19 @@ class Element:
 
 
 @dataclass
-class Mountain(Element):
-    symbol: str = "^"
+class Mountain(Entity):
     kind: str = "Mountain"
+    symbol: str = "^"
     resource: str = "Gold"
     color: int = 11
 
 
 @dataclass
-class Building(Element):
+class Building(Entity):
     base_cost: int = 50
-    production_rate: int = 5
+    production_rate: int = 1.5
     production_factor: int = 1.5
+    maintenance_cost: int = 1
     timer: int = 5
     clock: float = field(default_factory=time.time)
     visible: bool = True
@@ -70,6 +70,8 @@ class Building(Element):
         self.level += 1
         self.health = 5 * self.level
         self.production_rate = int(self.production_rate * self.production_factor)
+        self.maintenance_cost += self.level
+        self.timer = max(1, self.timer - 0.5)
         self._update_symbol()
 
     def _update_symbol(self):
@@ -86,7 +88,10 @@ class Mine(Building):
     resource: str = "Gold"
     level: int = 1
     health: int = 5
-    timer: int = 0.1
+    production_factor: float = Settings.MINE_PRODUCTION_FACTOR
+    production_rate: float = Settings.MINE_PRODUCTION_RATE
+    maintenance_cost: int = Settings.MINE_MAINTENANCE_COST
+    timer: int = Settings.MINE_TIMER
 
     def dig_success(self):
         return self._process()
@@ -97,7 +102,7 @@ class Mine(Building):
 
     def _update_symbol(self):
         self.symbol = str(self.level)
-        if self.level > 1:
+        if self.level > 2:
             self.color = 15
 
 
@@ -105,13 +110,12 @@ class Mine(Building):
 class Cannon(Building):
     kind: str = "Cannon"
     symbol: str = "I"
-    fmt: str = None
     level: int = 2
     kills: int = 0
     health: int = 6
-    production_factor: int = 1.2  # factor for upgrade
-    production_rate: int = 2  # distance
-    timer: int = 4  # speed
+    production_factor: float = Settings.CANNON_PRODUCTION_FACTOR  # factor for upgrade
+    production_rate: float = Settings.CANNON_PRODUCTION_RATE  # distance
+    timer: int = Settings.CANNON_TIMER  # speed
 
     def shot_success(self):
         return self._process()
@@ -124,7 +128,7 @@ class Cannon(Building):
 
 
 @dataclass
-class Enemy(Element):
+class Enemy(Entity):
     symbol: int = 4194430  # curses.ACS_BULLET
     kind: str = "Zombie"
     color: int = 5
@@ -137,7 +141,7 @@ class Enemy(Element):
 
 
 @dataclass
-class Spawner(Element):
+class Spawner(Entity):
     symbol: str = "#"
     kind: str = "Spawner"
     health: int = 10
@@ -149,13 +153,14 @@ class Spawner(Element):
 
 
 @dataclass
-class Fruit(Element):
+class Fruit(Entity):
     symbol: int = 4194409  # curses.ACS_LANTERN
     color: int = 3
 
 
 @dataclass
-class Base(Element):
+class Base(Entity):
+    kind: str = "Base"
     deployed: bool = False
     visible: bool = True
     health: int = 100
@@ -165,20 +170,29 @@ class Base(Element):
 
 
 @dataclass
-class Lintern(Element):
+class Satelite(Entity):
+    kind: str = "Satelite"
+    visible: bool = True
+    health: int = 10
+    symbol: int = 4194400  # curses.ACS_DIAMOND
+    color: int = 17
+
+
+@dataclass
+class Lintern(Entity):
     visible: bool = True
     symbol: str = "@"
     color: int = 17
 
 
 @dataclass
-class Trap(Element):
+class Trap(Entity):
     deployed: bool = False
     symbol: str = "%"
 
 
 @dataclass
-class Player(Element):
+class Player(Entity):
     kind: str = "Player"
     dir_y: int = 0
     dir_x: int = 0
@@ -200,7 +214,7 @@ class Player(Element):
 
 
 @dataclass
-class Bomb(Element):
+class Bomb(Entity):
     symbol: str = "+"
     strength: int = 5
     timer: int = 2

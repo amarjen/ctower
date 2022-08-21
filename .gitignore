@@ -2,16 +2,10 @@
 __pycache__/
 *.py[cod]
 
-# Distribution / packaging
-bin/
-build/
+# Builds
 develop-eggs/
 dist/
 eggs/
-lib64/
-parts/
-sdist/
-var/
 *.egg-info/
 .installed.cfg
 *.egg
@@ -20,7 +14,8 @@ var/
 pip-log.txt
 pip-delete-this-directory.txt
 
-# Unit test / coverage reports
+# Tests reports
+.pytest_cache/
 .tox/
 .coverage
 .cache
@@ -28,5 +23,7 @@ nosetests.xml
 coverage.xml
 
 # otros
+.ipynb_checkpoints/
 *.ipynb
 *.pdf
+curses-colors.py

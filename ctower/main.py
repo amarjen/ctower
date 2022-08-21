@@ -1,9 +1,18 @@
-#!/usr/bin/env python
 # -*- coding: utf-8 -*
 
-from .lib.elements import Element, Base, Player, Trap, Bomb, Fruit, Lintern
-from .lib.elements import Mountain, Mine, Cannon
-from .lib.elements import Spawner, Enemy
+from ctower.lib.entities import (
+    Entity,
+    Base,
+    Satelite,
+    Player,
+    Trap,
+    Bomb,
+    Fruit,
+    Lintern,
+)
+from ctower.lib.entities import Mountain, Mine, Cannon
+from ctower.lib.entities import Spawner, Enemy
+from ctower.lib.settings import Settings
 
 from dataclasses import dataclass, field
 from playsound import playsound
@@ -17,8 +26,6 @@ import time
 import math
 import sys
 import os
-
-FPS = 50
 
 
 @dataclass
@@ -80,6 +87,7 @@ class Game:
         )
 
         self.screen_limits = (self.min_y, self.max_y, self.min_x, self.max_x)
+        self.screen_center = (self.max_y // 2, self.max_x // 2)
         self.screen_size = (self.max_x - self.min_x) * (self.max_y - self.min_y)
 
         # Draw Window Borders
@@ -89,10 +97,10 @@ class Game:
         for x in range(1, self.max_x + 1):
             self.screen.addch(self.max_y + 1, x, curses.ACS_HLINE)
 
-        # Game Elements
-        self.player = Player(20, 20)
-        self.trap = Trap(20, 20)
-        self.base = Base(self.max_y // 2, self.max_x // 2, deployed=False)
+        # Game Components
+        self.player = Player(*self.screen_center)
+        self.trap = Trap(*self.screen_center)
+        self.base = Base(*self.screen_center, deployed=False)
 
         self.mountains = [
             Mountain(y, x)
@@ -116,6 +124,7 @@ class Game:
             ]
         ]
 
+        self.satelites = []
         self.mines = []
         self.cannons = []
         self.linterns = []
@@ -139,9 +148,10 @@ class Game:
         while True:
 
             # 1. Process Buildings (Mine -> Dig, Cannon -> Shoot...)
-            #    ,unless they are destroyed by an enemy
+            #    ,unless they are destroyed by an enemy,
+            #     and pay for maintenance 
 
-            self.buildings = list(chain(self.mines, self.cannons))
+            self.buildings = list(chain(self.mines, self.cannons, self.satelites))
             for building in self.buildings:
                 if building.health <= 0:
                     self.buildings.remove(building)
@@ -153,12 +163,25 @@ class Game:
                     elif building.kind == "Cannon":
                         self.cannons.remove(building)
 
+                    elif building.kind == "Satelite":
+                        # When a satelite is destroyed, all dependent buildings collapses next turn.
+                        self.satelites.remove(building)
+
+                        dependents = nearby_entities(
+                            building,
+                            chain(self.mines, self.cannons),
+                            Settings.SATELITE_VISIBILITY,
+                        )
+                        if dependents is not None:
+                            for building_dep in dependents:
+                                building_dep.health = 0
+
                 else:
                     if building.kind == "Mine" and building.dig_success():
                         self.base.gold += building.dig_value
 
                     elif building.kind == "Cannon" and building.shot_success():
-                        target = nearby_elements(
+                        target = nearby_entities(
                             building,
                             self.enemies,
                             d=building.production_rate,
@@ -171,8 +194,16 @@ class Game:
                             self.player.points += 1
                             building.kills += 1
 
+                        if self.base.gold < building.maintenance_cost:
+                            self.base.gold += building.cost_to_recover()
+                            self.buildings.remove(building)
+                            self.clear(building)
+
+                        else:
+                            self.base.gold -= building.maintenance_cost
+
             # 2. Spawn Enemies
-            if random.randint(0, 1000) < 10:
+            if random.randint(0, 1000) < Settings.SPAWNER_CHANCE + self.player.level:
                 s = random.choice(self.spawners)
                 self.enemies.append(s.spawn())
 
@@ -182,42 +213,37 @@ class Game:
 
                     # a. scan targets
                     targets = [
-                        {"target": target, "d": enemy.distance(target)}
+                        {"target": target, "distance": enemy.distance(target)}
                         for target in chain(
                             self.buildings,
                             [
                                 self.base,
                                 self.player,
                             ],
-                        )
+                        ) if enemy.distance(target) < Settings.ENEMY_VISIBILITY
                     ]
 
                     # b. Choose the nearest target and moves towards it
                     # TODO: Set weight to target kinds
                     if len(targets) > 0:
-                        target = sorted(targets, key=lambda x: x["d"])[0]["target"]
+                        target = sorted(targets, key=lambda x: x["distance"])[0][
+                            "target"
+                        ]
 
-                        if target.x - enemy.x > 0:
-                            delta_x = 1
-                        elif target.x - enemy.x < 0:
-                            delta_x = -1
-
-                        if target.y - enemy.y > 0:
-                            delta_y = 1
-                        elif target.y - enemy.y < 0:
-                            delta_y = -1
+                        dx = int(math.copysign(1, target.x - enemy.x))
+                        dy = int(math.copysign(1, target.y - enemy.y))
 
                     # if no targets, move randomly
                     else:
-                        delta_y = random.randint(-1, 1)
-                        delta_x = random.randint(-1, 1)
+                        dy = random.randint(-1, 1)
+                        dx = random.randint(-1, 1)
 
                     if (enemy.y, enemy.x) in self.area_light:
                         self.clear(enemy)
 
                     enemy.move(
-                        max(1, min(self.max_y, enemy.y + delta_y)),
-                        max(1, min(self.max_x, enemy.x + delta_x)),
+                        max(1, min(self.max_y, enemy.y + dy)),
+                        max(1, min(self.max_x, enemy.x + dx)),
                     )
 
                     # c. check collisions with player, buildings, base
@@ -235,12 +261,12 @@ class Game:
 
                     for building in self.buildings:
                         if collision(enemy, building):
-                            building.health -= 1
+                            building.health -= random.randint(0, 2)
 
                     if collision(self.base, enemy) and enemy in self.enemies:
                         self.enemies.remove(enemy)
                         self.player.points += 1
-                        self.base.health -= random.randint(0, 2)
+                        self.base.health -= random.randint(0, 5)
 
                     if self.trap.deployed:
                         if distance(self.trap, enemy) <= 5 and enemy in self.enemies:
@@ -250,7 +276,7 @@ class Game:
 
                 clock = time.time()
 
-            delta_x = delta_y = 0
+            dx = dy = 0
 
             # 4. Monitor Activated Bombs
             if len(self.bombs_activated) > 0:
@@ -263,7 +289,7 @@ class Game:
                     if bomb.is_kaboom:
                         play_sound("kaboom")
 
-                        victims = nearby_elements(
+                        victims = nearby_entities(
                             bomb,
                             chain(
                                 self.enemies,
@@ -373,19 +399,19 @@ class Game:
 
                 if key in [ord("h"), curses.KEY_LEFT]:
                     self.player.to_move = True
-                    delta_x = -1
+                    dx = -1
 
                 if key in [ord("l"), curses.KEY_RIGHT]:
                     self.player.to_move = True
-                    delta_x = 1
+                    dx = 1
 
                 if key in [ord("k"), curses.KEY_UP]:
                     self.player.to_move = True
-                    delta_y = -1
+                    dy = -1
 
                 if key in [ord("j"), curses.KEY_DOWN]:
                     self.player.to_move = True
-                    delta_y = 1
+                    dy = 1
 
                 if key == ord("b"):
                     # deploy bomb
@@ -398,7 +424,7 @@ class Game:
                     # not possible in an already built mine
                     if (
                         self.base.deployed
-                        and nearby_elements(
+                        and nearby_entities(
                             self.player,
                             chain(
                                 self.buildings,
@@ -409,19 +435,30 @@ class Game:
                             ),
                         )
                         is None
+                        and nearby_entities(
+                            self.player,
+                            chain(
+                                self.satelites,
+                                [
+                                    self.base,
+                                ],
+                            ),
+                            d=10,
+                        )
+                        is not None
                         and min(self.player.distance(mnt) for mnt in self.mountains)
                         == 1
-                        and self.base.gold >= 50
+                        and self.base.gold >= Settings.MINE_INITIAL_COST
                     ):
-                        self.base.gold -= 50
+                        self.base.gold -= Settings.MINE_INITIAL_COST
                         self.mines.append(Mine(self.player.y, self.player.x))
 
                 if key == ord("c"):
                     # build cannon
-                    # not possible in an already built mine
+                    # not possible in an already built building
                     if (
                         self.base.deployed
-                        and nearby_elements(
+                        and nearby_entities(
                             self.player,
                             chain(
                                 self.buildings,
@@ -432,14 +469,25 @@ class Game:
                             ),
                         )
                         is None
-                        and self.base.gold >= 50
+                        and nearby_entities(
+                            self.player,
+                            chain(
+                                self.satelites,
+                                [
+                                    self.base,
+                                ],
+                            ),
+                            d=10,
+                        )
+                        is not None
+                        and self.base.gold >= Settings.CANNON_INITIAL_COST
                     ):
-                        self.base.gold -= 50
+                        self.base.gold -= Settings.CANNON_INITIAL_COST
                         self.cannons.append(Cannon(self.player.y, self.player.x))
 
                 if key == ord("u"):
                     # upgrade building
-                    building = nearby_elements(self.player, self.buildings, ret="one")
+                    building = nearby_entities(self.player, self.buildings, ret="one")
 
                     if building is not None and building.level < 9:
                         cost = building.cost_to_upgrade()
@@ -449,7 +497,7 @@ class Game:
 
                 if key == ord("s"):
                     # sell building
-                    building = nearby_elements(self.player, self.buildings, ret="one")
+                    building = nearby_entities(self.player, self.buildings, ret="one")
                     if building is not None:
                         self.base.gold += building.cost_to_recover()
                         self.buildings.remove(building)
@@ -465,6 +513,27 @@ class Game:
                         self.base.y = self.player.y
                         self.base.x = self.player.x
 
+                    # deploy satelite
+                    else:
+                        if (
+                            nearby_entities(
+                                self.player,
+                                chain(
+                                    self.satelites,
+                                    [
+                                        self.base,
+                                    ],
+                                ),
+                                d=20,
+                            )
+                            is None
+                            and self.base.gold >= Settings.SATELITE_INITIAL_COST
+                        ):
+                            self.base.gold -= Settings.SATELITE_INITIAL_COST
+                            self.satelites.append(
+                                Satelite(self.player.y, self.player.x)
+                            )
+
                 if key == ord("g"):
                     # deploy lintern
                     self.linterns.append(Lintern(self.player.y, self.player.x))
@@ -479,10 +548,10 @@ class Game:
             if self.player.to_move:
                 self.clear(self.player)
                 self.player.move(
-                    max(1, min(self.max_y, self.player.y + delta_y)),
-                    max(1, min(self.max_x, self.player.x + delta_x)),
+                    max(1, min(self.max_y, self.player.y + dy)),
+                    max(1, min(self.max_x, self.player.x + dx)),
                 )
-                delta_x = delta_y = 0
+                dx = dy = 0
                 self.player.to_move = False
 
             ####
@@ -494,7 +563,9 @@ class Game:
             if (
                 self.player.health <= 0
                 or self.base.health <= 0
-                or (self.base.gold < 50 and len(self.mines) == 0)
+                or (
+                    self.base.gold < Settings.MINE_INITIAL_COST and len(self.mines) == 0
+                )
             ):
                 self.gameover()
 
@@ -505,20 +576,22 @@ class Game:
                 and distance(self.base, self.trap) <= 3
                 and distance(self.base, self.player) <= 3
                 and len(self.enemies) < 2
+                or len(self.spawners) == 0
             ):
                 self.gamewon()
 
             self.screen.refresh()
-            curses.napms(1000 // FPS)
+            curses.napms(1000 // Settings.FPS)
 
     def print_stats(self):
         # print stats
-        place = nearby_elements(
+        place = nearby_entities(
             self.player,
             chain(
                 self.mines,
                 self.cannons,
                 self.mountains,
+                self.satelites,
                 [
                     self.base,
                 ],
@@ -528,18 +601,17 @@ class Game:
 
         stats_line0 = f"Coord: ({self.player.y:3},{self.player.x:3})"
         if place is not None:
+            stats_line0 += (
+                f"  Place: {place.kind}, lvl: {place.level}, health: {place.health}"
+            )
+
             if place.kind == "Mine":
-                stats_line0 += f"  Place: {place.kind}, lvl: {place.level}, production: {place.production_rate}, health: {place.health}, cost to (u)pgrade: {place.cost_to_upgrade()}, (s)ell for {place.cost_to_recover()}"
+                stats_line0 += f", production: {place.production_rate}, cost to (u)pgrade: {place.cost_to_upgrade()}, (s)ell for {place.cost_to_recover()}"
                 stats_line0 += f"  Time: {place.time_pending}"
 
             elif place.kind == "Cannon":
-                stats_line0 += f"  Place: {place.kind}, lvl: {place.level}, kills: {place.kills}, health: {place.health}, cost to (u)pgrade: {place.cost_to_upgrade()}"
+                stats_line0 += f", kills: {place.kills}, cost to (u)pgrade: {place.cost_to_upgrade()}"
                 stats_line0 += f"  Time: {place.time_pending}"
-
-            else:
-                stats_line0 += (
-                    f"  Place: {place.kind}, lvl: {place.level}, health: {place.health}"
-                )
 
         stats_line1 = f"Level: {self.player.level:2}     "
         stats_line1 += f"Health: {self.player.health:3}     "
@@ -555,7 +627,37 @@ class Game:
 
         self.player.level = self.player.points // 20 + 1
 
-    def pause(self, key_continue=None):
+    def pause(self):
+        self.centered_msg("PAUSE", None, curses.A_BOLD | curses.A_UNDERLINE)
+
+    def centered_msg(self, text, key_continue=None, *args):
+
+        if isinstance(text, str):
+            text = [
+                text,
+            ]
+
+        if key_continue == None:
+            key_str = "any"
+
+        else:
+            key_str = f"'{key_continue}'"
+
+        text.append(f"Press {key_str} key to continue")
+
+        cols = max(len(t) for t in text) + 2
+        rows = len(text)
+
+        win = curses.newwin(
+            rows + 2, cols + 2, (self.max_y - rows) // 2, (self.max_x - cols) // 2
+        )
+        win.border(0)
+
+        for row, t in enumerate(text):
+            win.addstr(row + 1, (cols - len(t)) // 2 + 1, t, *args)
+
+        win.refresh()
+
         while True:
             key = self.screen.getch()
             if key is not curses.ERR:
@@ -565,47 +667,56 @@ class Game:
                 else:
                     break
 
+        curses.endwin()
+        self.render_all(reset_fog=True)
+
     def gameover(self):
-        self.screen.addstr(
-            self.max_y // 2, self.max_x // 2, "¡¡¡ GAME OVER !!!", curses.A_BLINK
+        self.centered_msg(
+            "¡¡¡ GAME OVER !!!",
+            "q",
+            curses.A_STANDOUT,
         )
-        self.pause("q")
         sys.exit()
 
     def gamewon(self):
-        self.screen.addstr(
-            self.max_y // 2,
-            self.max_x // 2,
-            "¡¡¡ CONGRATULATIONS, YOU WON !!!",
-            curses.A_BLINK,
+        self.centered_msg(
+            ["¡¡¡ CONGRATULATIONS, YOU WON !!!", "This is very impresive"], "q"
         )
-        self.screen.addstr(
-            self.max_y // 2 + 1,
-            self.max_x // 2,
-            "This is very impresive.",
-            curses.A_BLINK,
-        )
-        self.pause("q")
         sys.exit()
 
     def clear(self, *args):
         """
         clears one pixel from screen
-        calling with an Element instance (Player, Enemy...), or directly by coordinate
+        calling with an Entity instance (Player, Enemy...), or directly by coordinate
         """
-        if isinstance(args[0], Element):
+        if isinstance(args[0], Entity):
             y, x = args[0].y, args[0].x
+
         else:
             y, x = args[0:2]
 
         self.screen.addch(y, x, " ", curses.color_pair(1))
 
-    def render_all(self):
+    def render_all(self, reset_fog=False):
         """
-        render all visible elements and updates fog area
+        render all visible entities and updates fog area
         """
         ## Update Area Light
-        self.area_light = set(surronding_area(self.player, 5, *self.screen_limits))
+        self.area_light = set(
+            surronding_area(
+                self.player, Settings.PLAYER_VISIBILITY, *self.screen_limits
+            )
+        )
+
+        if self.base.deployed:
+            self.area_light = set(
+                chain(
+                    self.area_light,
+                    surronding_area(
+                        self.base, Settings.BASE_VISIBILITY, *self.screen_limits
+                    ),
+                )
+            )
 
         if len(self.linterns) > 0:
 
@@ -613,17 +724,24 @@ class Game:
                 chain(
                     self.area_light,
                     chain.from_iterable(
-                        surronding_area(l, 5, *self.screen_limits)
+                        surronding_area(
+                            l, Settings.LINTERN_VISIBILITY, *self.screen_limits
+                        )
                         for l in self.linterns
                     ),
                 )
             )
+        if len(self.satelites) > 0:
 
-        if self.base.deployed:
             self.area_light = set(
                 chain(
                     self.area_light,
-                    surronding_area(self.base, 10, *self.screen_limits),
+                    chain.from_iterable(
+                        surronding_area(
+                            s, Settings.SATELITE_VISIBILITY, *self.screen_limits
+                        )
+                        for s in self.satelites
+                    ),
                 )
             )
 
@@ -633,6 +751,7 @@ class Game:
         for item in chain(
             self.mountains,
             self.buildings,
+            self.satelites,
             self.linterns,
             self.enemies,
             self.spawners,
@@ -645,20 +764,20 @@ class Game:
             if (item.y, item.x) in self.area_light:
                 self.render(item)
 
-        if self.area.difference(self.area_light) != self.area_fog:
-            # render background if it has changed
+        if self.area.difference(self.area_light) != self.area_fog or reset_fog:
+            # render fog bg if it has changed or forced to reset
             self.area_fog = self.area.difference(self.area_light)
             self.render_fog(self.area_fog)
 
-    def render(self, element, *args, **kwargs):
+    def render(self, entity, *args, **kwargs):
         """
-        render single element
+        render single entity
         """
 
-        if not element.deployed or not element.visible:
+        if not entity.deployed or not entity.visible:
             return
 
-        c = element.color
+        c = entity.color
 
         if "symbol_overwrite" not in kwargs.keys():
             symbol_overwrite = None
@@ -666,16 +785,14 @@ class Game:
         else:
             symbol = kwargs["symbol_overwrite"]
 
-        if element.symbol is None and symbol_overwrite is None:
-            print("Element has not symbol defined, this it is not drawable")
+        if entity.symbol is None and symbol_overwrite is None:
+            print("Entity has not symbol defined, this it is not drawable")
             raise BaseException
 
         if symbol_overwrite is None:
-            self.screen.addch(
-                element.y, element.x, element.symbol, curses.color_pair(c)
-            )
+            self.screen.addch(entity.y, entity.x, entity.symbol, curses.color_pair(c))
         else:
-            self.screen.addch(element.y, element.x, symbol, curses.color_pair(c))
+            self.screen.addch(entity.y, entity.x, symbol, curses.color_pair(c))
 
     def render_fog(self, area, method="set"):
         if method == "set":
@@ -691,7 +808,15 @@ def distance(objA, objB):
     return objA.distance(objB)
 
 
-def surronding_area(obj, distance, min_y, max_y, min_x, max_x, includes_self=True):
+def surronding_area(
+    obj: Entity,
+    distance: int,
+    min_y: int,
+    max_y: int,
+    min_x: int,
+    max_x: int,
+    includes_self: bool = True,
+) -> list:
     area = [
         (max(min_y, min(max_y, (obj.y + dy))), max(min_x, min(max_x, (obj.x + dx))))
         for dy in range(-distance, distance + 1)
@@ -706,17 +831,17 @@ def surronding_area(obj, distance, min_y, max_y, min_x, max_x, includes_self=Tru
     return list(area)
 
 
-def is_inside(obj, area):
+def is_inside(obj: Entity, area) -> bool:
     return {(obj.y, obj.x)} in area
 
 
-def collision(objA, objB):
+def collision(objA: Entity, objB: Entity) -> bool:
     return objA.distance(objB) == 0
 
 
-def nearby_elements(objA, lst, d=0, ret="all"):
+def nearby_entities(objA, lst, d=0, ret="all"):
     """
-    returns nearby elements from lst within d distance of objA
+    returns nearby entities from lst within d distance of objA
     """
     result = [objB for objB in lst if objB.distance(objA) <= d]
 
