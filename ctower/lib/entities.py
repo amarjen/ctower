@@ -221,9 +221,9 @@ class Bomb(Entity):
     t0: float = field(default_factory=time.time)
 
     @property
-    def area(self) -> list:
+    def area(self) -> set:
         s = self.strength
-        return [
+        return set(
             (self.y + dy, self.x + dx)
             for dy in range(-s, s + 1)
             for dx in range(-s, s + 1)
@@ -231,7 +231,7 @@ class Bomb(Entity):
                 math.sqrt((self.x - (self.x + dx)) ** 2 + (self.y - (self.y + dy)) ** 2)
             )
             <= s
-        ]
+        )
 
     @property
     def is_kaboom(self):

@@ -6,6 +6,7 @@ class Settings:
     FPS: int = 50
     PLAYER_VISIBILITY: int = 5
     BASE_VISIBILITY: int = 10
+    LINTERN_VISIBILITY: int = 4
     SATELITE_VISIBILITY: int = 10
     SPAWNER_CHANCE: int = 5
     ENEMY_VISIBILITY: int = 30

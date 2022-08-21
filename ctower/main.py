@@ -133,7 +133,7 @@ class Game:
         self.bombs_topick = []
         self.bombs_activated = []
 
-        self.area = set(
+        self.screen_area = set(
             (y, x)
             for y in range(self.min_y, self.max_y + 1)
             for x in range(self.min_x, self.max_x + 1)
@@ -149,7 +149,7 @@ class Game:
 
             # 1. Process Buildings (Mine -> Dig, Cannon -> Shoot...)
             #    ,unless they are destroyed by an enemy,
-            #     and pay for maintenance 
+            #     and pay for maintenance
 
             self.buildings = list(chain(self.mines, self.cannons, self.satelites))
             for building in self.buildings:
@@ -220,7 +220,8 @@ class Game:
                                 self.base,
                                 self.player,
                             ],
-                        ) if enemy.distance(target) < Settings.ENEMY_VISIBILITY
+                        )
+                        if enemy.distance(target) < Settings.ENEMY_VISIBILITY
                     ]
 
                     # b. Choose the nearest target and moves towards it
@@ -282,9 +283,8 @@ class Game:
             if len(self.bombs_activated) > 0:
                 for bomb in self.bombs_activated:
 
-                    for (y, x) in bomb.area:
-                        if (y > 0 and y < self.max_y) and (x > 0 and x < self.max_x):
-                            self.screen.addstr(y, x, "~", curses.color_pair(4))
+                    for (y, x) in bomb.area.intersection(self.screen_area):
+                        self.screen.addstr(y, x, "~", curses.color_pair(6))
 
                     if bomb.is_kaboom:
                         play_sound("kaboom")
@@ -310,11 +310,8 @@ class Game:
                                 else:
                                     victim.health -= 5
 
-                        for (y, x) in bomb.area:
-                            if (y > 0 and y < self.max_y) and (
-                                x > 0 and x < self.max_x - 1
-                            ):
-                                self.clear(y, x)
+                        for (y, x) in bomb.area.intersection(self.screen_area):
+                            self.clear(y, x)
 
                         self.bombs_activated.remove(bomb)
                         self.clear(bomb)
@@ -396,6 +393,9 @@ class Game:
 
                 if key == ord("p"):
                     self.pause()
+
+                if key == curses.KEY_F1:
+                    self.help()
 
                 if key in [ord("h"), curses.KEY_LEFT]:
                     self.player.to_move = True
@@ -627,10 +627,36 @@ class Game:
 
         self.player.level = self.player.points // 20 + 1
 
-    def pause(self):
-        self.centered_msg("PAUSE", None, curses.A_BOLD | curses.A_UNDERLINE)
+    def help(self):
+        """
+        TODO: prints help window, with all keybindings...
+        """
+        self.message(
+            [
+                "HELP",
+                "(hjkl)|(ARROW KEYS): Move",
+                "(v) Deploy base, and build satelites",
+                "(m) Build Mine",
+                "(c) Build Cannon",
+                "(g) Build Lantern",
+                "(b) Throw Bomb",
+                "(u) Upgrade building",
+                "(s) Sell building",
+                "(F1) This help",
+            ],
+            None,
+            justify="left",
+        )
+        pass
 
-    def centered_msg(self, text, key_continue=None, *args):
+    def pause(self):
+        self.message("PAUSE", None, curses.A_BOLD | curses.A_UNDERLINE)
+
+    def message(self, text, key_continue=None, justify="center", *args):
+        """
+        prints message in a pop-up window and waits for key to continue
+        TODO: Compute x coordinates for differents values of justify
+        """
 
         if isinstance(text, str):
             text = [
@@ -671,7 +697,7 @@ class Game:
         self.render_all(reset_fog=True)
 
     def gameover(self):
-        self.centered_msg(
+        self.message(
             "¡¡¡ GAME OVER !!!",
             "q",
             curses.A_STANDOUT,
@@ -679,7 +705,7 @@ class Game:
         sys.exit()
 
     def gamewon(self):
-        self.centered_msg(
+        self.message(
             ["¡¡¡ CONGRATULATIONS, YOU WON !!!", "This is very impresive"], "q"
         )
         sys.exit()
@@ -764,9 +790,9 @@ class Game:
             if (item.y, item.x) in self.area_light:
                 self.render(item)
 
-        if self.area.difference(self.area_light) != self.area_fog or reset_fog:
+        if self.screen_area.difference(self.area_light) != self.area_fog or reset_fog:
             # render fog bg if it has changed or forced to reset
-            self.area_fog = self.area.difference(self.area_light)
+            self.area_fog = self.screen_area.difference(self.area_light)
             self.render_fog(self.area_fog)
 
     def render(self, entity, *args, **kwargs):
