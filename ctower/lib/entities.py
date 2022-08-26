@@ -196,21 +196,23 @@ class Player(Entity):
     kind: str = "Player"
     dir_y: int = 0
     dir_x: int = 0
+    world_limits: tuple = None
     health: int = 100
     points: int = 0
     bombs: int = 2
     level: int = 1
-    to_move: bool = False
     symbol: str = "*"
     color: int = 13
     visible: bool = True
 
-    def move(self, new_y, new_x):
-        self.dir_y = new_y - self.y
-        self.dir_x = new_x - self.x
+    def move(self, dy=0, dx=0):
+        min_y, max_y, min_x, max_x = self.world_limits
 
-        self.y = new_y
-        self.x = new_x
+        self.dir_y = math.copysign(1, dy)
+        self.dir_x = math.copysign(1, dx)
+
+        self.y = max(min_y, min(max_y, self.y + dy))
+        self.x = max(min_x, min(max_x, self.x + dx))
 
 
 @dataclass

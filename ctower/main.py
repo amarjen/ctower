@@ -98,7 +98,7 @@ class Game:
             self.screen.addch(self.max_y + 1, x, curses.ACS_HLINE)
 
         # Game Components
-        self.player = Player(*self.screen_center)
+        self.player = Player(*self.screen_center, world_limits=self.screen_limits)
         self.trap = Trap(*self.screen_center)
         self.base = Base(*self.screen_center, deployed=False)
 
@@ -139,6 +139,29 @@ class Game:
             for x in range(self.min_x, self.max_x + 1)
         )
         self.area_fog = set()
+
+        self.KEY_BINDINGS = {
+            ord("q"): sys.exit,
+            ord("h"): lambda: self.player.move(dx=-1),
+            ord("j"): lambda: self.player.move(dy=1),
+            ord("k"): lambda: self.player.move(dy=-1),
+            ord("l"): lambda: self.player.move(dx=1),
+            curses.KEY_DOWN: lambda: self.player.move(dy=1),
+            curses.KEY_UP: lambda: self.player.move(dy=-1),  
+            curses.KEY_LEFT: lambda: self.player.move(dx=-1),
+            curses.KEY_RIGHT: lambda: self.player.move(dx=1),
+            ord("v"): self.build_base,
+            ord("m"): self.build_mine,
+            ord("c"): self.build_cannon,
+            ord("u"): self.upgrade_building,
+            ord("s"): self.sell_building,
+            ord("b"): self.throw_bomb,
+            ord("g"): self.build_lantern,
+            ord("p"): self.pause,
+            curses.KEY_F1: self.help,
+            ord(" "): self.deploy_trap,
+        }
+
 
         self.loop()
 
@@ -277,8 +300,6 @@ class Game:
 
                 clock = time.time()
 
-            dx = dy = 0
-
             # 4. Monitor Activated Bombs
             if len(self.bombs_activated) > 0:
                 for bomb in self.bombs_activated:
@@ -363,198 +384,12 @@ class Game:
                         self.player.bombs += 1
                         self.bombs_topick.remove(bomb)
 
-            # Wait for a keystroke
-
-            #  key_bindings ={'q': sys.exit,
-            #  'h': move_left,
-            #  'j': move_down,
-            #  'k': move_up,
-            #  'l': move_right,
-            #
-            #  'curses_KEY_LEFT': move_left,
-            #  'curses_KEY_DOWN': move_down,
-            #  'curses_KEY_UP': move_up,
-            #  'curses_KEY_RIGHT': move_right,
-            #
-            #  'v': build_base,
-            #  'm': build_mine,
-            #  'c': build_cannon,
-            #  'u': upgrade_building,
-            #  's': sell_building,
-            #  'b': deploy_bomb,
-            #  ' ': deplot_trap,
-            #  }
-            key = self.screen.getch()
 
             # Process the keystroke
-            if key is not curses.ERR:
-                if key == ord("q"):
-                    break
+            key = self.screen.getch()
 
-                if key == ord("p"):
-                    self.pause()
-
-                if key == curses.KEY_F1:
-                    self.help()
-
-                if key in [ord("h"), curses.KEY_LEFT]:
-                    self.player.to_move = True
-                    dx = -1
-
-                if key in [ord("l"), curses.KEY_RIGHT]:
-                    self.player.to_move = True
-                    dx = 1
-
-                if key in [ord("k"), curses.KEY_UP]:
-                    self.player.to_move = True
-                    dy = -1
-
-                if key in [ord("j"), curses.KEY_DOWN]:
-                    self.player.to_move = True
-                    dy = 1
-
-                if key == ord("b"):
-                    # deploy bomb
-                    if self.player.bombs > 0:
-                        self.bombs_activated.append(Bomb(self.player.y, self.player.x))
-                        self.player.bombs -= 1
-
-                if key == ord("m"):
-                    # build mine, in the distance of 1 of a mine, but not ontop and
-                    # not possible in an already built mine
-                    if (
-                        self.base.deployed
-                        and nearby_entities(
-                            self.player,
-                            chain(
-                                self.buildings,
-                                self.mountains,
-                                [
-                                    self.base,
-                                ],
-                            ),
-                        )
-                        is None
-                        and nearby_entities(
-                            self.player,
-                            chain(
-                                self.satelites,
-                                [
-                                    self.base,
-                                ],
-                            ),
-                            d=10,
-                        )
-                        is not None
-                        and min(self.player.distance(mnt) for mnt in self.mountains)
-                        == 1
-                        and self.base.gold >= Settings.MINE_INITIAL_COST
-                    ):
-                        self.base.gold -= Settings.MINE_INITIAL_COST
-                        self.mines.append(Mine(self.player.y, self.player.x))
-
-                if key == ord("c"):
-                    # build cannon
-                    # not possible in an already built building
-                    if (
-                        self.base.deployed
-                        and nearby_entities(
-                            self.player,
-                            chain(
-                                self.buildings,
-                                self.mountains,
-                                [
-                                    self.base,
-                                ],
-                            ),
-                        )
-                        is None
-                        and nearby_entities(
-                            self.player,
-                            chain(
-                                self.satelites,
-                                [
-                                    self.base,
-                                ],
-                            ),
-                            d=10,
-                        )
-                        is not None
-                        and self.base.gold >= Settings.CANNON_INITIAL_COST
-                    ):
-                        self.base.gold -= Settings.CANNON_INITIAL_COST
-                        self.cannons.append(Cannon(self.player.y, self.player.x))
-
-                if key == ord("u"):
-                    # upgrade building
-                    building = nearby_entities(self.player, self.buildings, ret="one")
-
-                    if building is not None and building.level < 9:
-                        cost = building.cost_to_upgrade()
-                        if self.base.gold >= cost:
-                            self.base.gold -= cost
-                            building.upgrade()
-
-                if key == ord("s"):
-                    # sell building
-                    building = nearby_entities(self.player, self.buildings, ret="one")
-                    if building is not None:
-                        self.base.gold += building.cost_to_recover()
-                        self.buildings.remove(building)
-                        if building.kind == "Mine":
-                            self.mines.remove(building)
-                        elif building.kind == "Cannon":
-                            self.cannons.remove(building)
-
-                if key == ord("v"):
-                    # deploy base
-                    if not self.base.deployed:
-                        self.base.deployed = True
-                        self.base.y = self.player.y
-                        self.base.x = self.player.x
-
-                    # deploy satelite
-                    else:
-                        if (
-                            nearby_entities(
-                                self.player,
-                                chain(
-                                    self.satelites,
-                                    [
-                                        self.base,
-                                    ],
-                                ),
-                                d=20,
-                            )
-                            is None
-                            and self.base.gold >= Settings.SATELITE_INITIAL_COST
-                        ):
-                            self.base.gold -= Settings.SATELITE_INITIAL_COST
-                            self.satelites.append(
-                                Satelite(self.player.y, self.player.x)
-                            )
-
-                if key == ord("g"):
-                    # deploy lintern
-                    self.linterns.append(Lintern(self.player.y, self.player.x))
-
-                if key == ord(" "):
-                    # deploy trap
-                    if self.trap.deployed == False:
-                        self.trap.deployed = True
-                        self.trap.y = self.player.y + self.player.dir_y * 2
-                        self.trap.x = self.player.x + self.player.dir_x * 2
-
-            if self.player.to_move:
-                self.clear(self.player)
-                self.player.move(
-                    max(1, min(self.max_y, self.player.y + dy)),
-                    max(1, min(self.max_x, self.player.x + dx)),
-                )
-                dx = dy = 0
-                self.player.to_move = False
-
-            ####
+            if key in self.KEY_BINDINGS.keys():
+                self.KEY_BINDINGS[key]()
 
             self.render_all()
             self.print_stats()
@@ -583,8 +418,131 @@ class Game:
             self.screen.refresh()
             curses.napms(1000 // Settings.FPS)
 
+    def build_base(self):
+        # first deploy base
+        if not self.base.deployed:
+            self.base.deployed = True
+            self.base.y = self.player.y
+            self.base.x = self.player.x
+
+        # next, deploy satelites
+        else:
+            if (
+                nearby_entities(
+                    self.player,
+                    chain(
+                        self.satelites,
+                        [
+                            self.base,
+                        ],
+                    ),
+                    d=20,
+                )
+                is None
+                and self.base.gold >= Settings.SATELITE_INITIAL_COST
+            ):
+                self.base.gold -= Settings.SATELITE_INITIAL_COST
+                self.satelites.append(Satelite(self.player.y, self.player.x))
+
+    def build_mine(self):
+        # build mine, in the distance of 1 of a mine, but not ontop and
+        # not possible in an already built mine
+        if (
+            self.base.deployed
+            and nearby_entities(
+                self.player,
+                chain(
+                    self.buildings,
+                    self.mountains,
+                    [
+                        self.base,
+                    ],
+                ),
+            )
+            is None
+            and nearby_entities(
+                self.player,
+                chain(
+                    self.satelites,
+                    [
+                        self.base,
+                    ],
+                ),
+                d=10,
+            )
+            is not None
+            and min(self.player.distance(mnt) for mnt in self.mountains) == 1
+            and self.base.gold >= Settings.MINE_INITIAL_COST
+        ):
+            self.base.gold -= Settings.MINE_INITIAL_COST
+            self.mines.append(Mine(self.player.y, self.player.x))
+
+    def build_cannon(self):
+        # build cannon
+        # not possible in an already built building
+        if (
+            self.base.deployed
+            and nearby_entities(
+                self.player,
+                chain(
+                    self.buildings,
+                    self.mountains,
+                    [
+                        self.base,
+                    ],
+                ),
+            )
+            is None
+            and nearby_entities(
+                self.player,
+                chain(
+                    self.satelites,
+                    [
+                        self.base,
+                    ],
+                ),
+                d=10,
+            )
+            is not None
+            and self.base.gold >= Settings.CANNON_INITIAL_COST
+        ):
+            self.base.gold -= Settings.CANNON_INITIAL_COST
+            self.cannons.append(Cannon(self.player.y, self.player.x))
+
+    def deploy_trap(self):
+        if self.trap.deployed == False:
+            self.trap.deployed = True
+            self.trap.y = self.player.y + self.player.dir_y * 2
+            self.trap.x = self.player.x + self.player.dir_x * 2
+
+    def build_lantern(self):
+        self.linterns.append(Lintern(self.player.y, self.player.x))
+
+    def throw_bomb(self):
+        if self.player.bombs > 0:
+            self.bombs_activated.append(Bomb(self.player.y, self.player.x))
+            self.player.bombs -= 1
+
+    def upgrade_building(self):
+        building = nearby_entities(self.player, self.buildings, ret="one")
+
+        if building is not None and building.level < 9:
+            cost = building.cost_to_upgrade()
+            if self.base.gold >= cost:
+                self.base.gold -= cost
+                building.upgrade()
+
+    def sell_building(self):
+        building = nearby_entities(self.player, self.buildings, ret="one")
+        if building is not None:
+            self.base.gold += building.cost_to_recover()
+            self.buildings.remove(building)
+            if building.kind == "Mine":
+                self.mines.remove(building)
+            elif building.kind == "Cannon":
+                self.cannons.remove(building)
+
     def print_stats(self):
-        # print stats
         place = nearby_entities(
             self.player,
             chain(
@@ -647,7 +605,6 @@ class Game:
             None,
             justify="left",
         )
-        pass
 
     def pause(self):
         self.message("PAUSE", None, curses.A_BOLD | curses.A_UNDERLINE)
@@ -685,7 +642,7 @@ class Game:
         win.refresh()
 
         while True:
-            key = self.screen.getch()
+            key = win.getch()
             if key is not curses.ERR:
                 if key_continue is not None:
                     if key == ord(key_continue):
