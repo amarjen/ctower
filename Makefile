@@ -4,6 +4,11 @@ install-editable:
 test:
 	py.test tests
 
+gitpush:
+	git add .
+	git commit -m "$@"
+	git push origin
+
 pdf:
 	enscript -C -G2rE ctower/main.py ctower/lib/entities.py ctower/lib/settings.py -o program.ps
 	ps2pdf program.ps
