@@ -37,7 +37,7 @@ class Game:
         game = cls()
         return game
 
-    def init(self, screen):
+    def initscr(self, screen):
 
         self.screen = screen
 
@@ -97,6 +97,9 @@ class Game:
         for x in range(1, self.max_x + 1):
             self.screen.addch(self.max_y + 1, x, curses.ACS_HLINE)
 
+        self.init()
+
+    def init(self):
         # Game Components
         self.player = Player(*self.screen_center, world_limits=self.screen_limits)
         self.trap = Trap(*self.screen_center)
@@ -138,6 +141,7 @@ class Game:
             for y in range(self.min_y, self.max_y + 1)
             for x in range(self.min_x, self.max_x + 1)
         )
+
         self.area_fog = set()
 
         self.KEY_BINDINGS = {
@@ -147,7 +151,7 @@ class Game:
             ord("k"): lambda: self.player.move(dy=-1),
             ord("l"): lambda: self.player.move(dx=1),
             curses.KEY_DOWN: lambda: self.player.move(dy=1),
-            curses.KEY_UP: lambda: self.player.move(dy=-1),  
+            curses.KEY_UP: lambda: self.player.move(dy=-1),
             curses.KEY_LEFT: lambda: self.player.move(dx=-1),
             curses.KEY_RIGHT: lambda: self.player.move(dx=1),
             ord("v"): self.build_base,
@@ -161,7 +165,6 @@ class Game:
             curses.KEY_F1: self.help,
             ord(" "): self.deploy_trap,
         }
-
 
         self.loop()
 
@@ -188,7 +191,7 @@ class Game:
 
                     elif building.kind == "Satelite":
                         # When a satelite is destroyed, all dependent buildings collapses next turn.
-                        self.satelites.remove(building)
+                        self.satelites.remove()
 
                         dependents = nearby_entities(
                             building,
@@ -384,7 +387,6 @@ class Game:
                         self.player.bombs += 1
                         self.bombs_topick.remove(bomb)
 
-
             # Process the keystroke
             key = self.screen.getch()
 
@@ -405,14 +407,7 @@ class Game:
                 self.gameover()
 
             # Gamewon Condition
-            if (
-                self.player.level > 10
-                and self.trap.deployed
-                and distance(self.base, self.trap) <= 3
-                and distance(self.base, self.player) <= 3
-                and len(self.enemies) < 2
-                or len(self.spawners) == 0
-            ):
+            if len(self.spawners) == 0:
                 self.gamewon()
 
             self.screen.refresh()
@@ -447,6 +442,7 @@ class Game:
     def build_mine(self):
         # build mine, in the distance of 1 of a mine, but not ontop and
         # not possible in an already built mine
+        # returns success
         if (
             self.base.deployed
             and nearby_entities(
@@ -516,7 +512,9 @@ class Game:
             self.trap.x = self.player.x + self.player.dir_x * 2
 
     def build_lantern(self):
-        self.linterns.append(Lintern(self.player.y, self.player.x))
+        if self.base.gold >= Settings.LANTERN_INITIAL_COST:
+            self.base.gold -= Settings.LANTERN_INITIAL_COST
+            self.linterns.append(Lintern(self.player.y, self.player.x))
 
     def throw_bomb(self):
         if self.player.bombs > 0:
@@ -777,7 +775,10 @@ class Game:
         else:
             self.screen.addch(entity.y, entity.x, symbol, curses.color_pair(c))
 
-    def render_fog(self, area, method="set"):
+    def render_fog(self, area: list, method="set"):
+        """
+        sets or remove fog background in area defined as a list of points
+        """
         if method == "set":
             for (y, x) in area:
                 self.screen.addch(y, x, "-", curses.color_pair(2))
@@ -852,7 +853,7 @@ def play_sound(asset):
 
 def start():
     game = Game.create()
-    curses.wrapper(game.init)
+    curses.wrapper(game.initscr)
 
 
 if __name__ == "__main__":

@@ -2,11 +2,11 @@ install-editable:
 	python -m pip install --editable .
 
 test:
-	py.test tests
+	pytest --cov-report term-missing --cov ctower tests/ --verbose
 
 gitpush:
 	git add .
-	git commit -m "$(message)"
+	git commit -m "$(m)"
 	git push origin
 
 pdf:

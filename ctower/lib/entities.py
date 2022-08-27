@@ -110,7 +110,7 @@ class Mine(Building):
 class Cannon(Building):
     kind: str = "Cannon"
     symbol: str = "I"
-    level: int = 2
+    level: int = 1
     kills: int = 0
     health: int = 6
     production_factor: float = Settings.CANNON_PRODUCTION_FACTOR  # factor for upgrade
